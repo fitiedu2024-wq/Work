@@ -702,7 +702,8 @@ export function listLocalInventory(env: Env, key: ProductKey, pageSize: number, 
 }
 
 export function setLocalInventory(env: Env, input: LocalInventoryInput): Promise<unknown> {
-	if ((input.pickupMethod && input.pickupMethod !== "NOT_SUPPORTED") !== Boolean(input.pickupSla)) {
+	const needsSla = Boolean(input.pickupMethod) && input.pickupMethod !== "NOT_SUPPORTED";
+	if (needsSla !== Boolean(input.pickupSla)) {
 		throw new Error("pickup_method and pickup_sla must be provided together (unless pickup_method is NOT_SUPPORTED).");
 	}
 	const attributes: JsonObject = priceAttributes(input.price, input.salePrice, input.currencyCode);
