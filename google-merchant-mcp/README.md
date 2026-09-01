@@ -1,6 +1,6 @@
-# Google Merchant MCP for ChatGPT Web
+# Google Merchant MCP
 
-A remote, OAuth-protected MCP server for the `layaldress.com` Google Merchant Center account.
+A remote, OAuth-protected MCP server for the `layaldress.com` Google Merchant Center account. Works with any MCP client that supports remote OAuth servers (Cursor, ChatGPT, Claude, and others).
 
 ## Remote endpoint
 
@@ -8,21 +8,53 @@ A remote, OAuth-protected MCP server for the `layaldress.com` Google Merchant Ce
 
 ## Included tools
 
-- Read Merchant account details.
-- List product data sources.
-- List processed products and their issues.
-- Get a single product.
-- List account-level issues.
-- Run Merchant Query Language reports.
-- Add or replace a product in an API data source.
-- Partially update selected product fields without replacing the full input.
-- Delete a product input from a specific data source.
-- Read and safely replace complete shipping settings using etag protection.
-- Read return policies and promotions, plus approved promotion writes.
-- Discover the full Merchant management capability catalog.
-- Read any Merchant API route scoped to the configured account.
-- Write any Merchant API route scoped to the configured account after explicit approval.
-- Run an approved batch of up to 20 Merchant writes with bounded concurrency.
+### Account and settings
+
+- `get_merchant_account` — account details.
+- `get_business_info`, `get_business_identity`, `get_homepage` — business profile, identity attributes, homepage claim status.
+- `list_users`, `list_account_relationships`, `list_account_services` — access and third-party links.
+- `get_automatic_improvements`, `get_autofeed_settings`, `list_programs` — account-level settings and program participation.
+- `list_merchant_capabilities` — the full management capability catalog.
+
+### Catalog
+
+- `list_data_sources` — product data sources and which accept API writes.
+- `list_products`, `get_product` — processed products with status and issues.
+- `upsert_product`, `patch_product`, `delete_product` — product input writes (approval required).
+
+### Regions and inventory
+
+- `list_regions`, `get_region`, `upsert_region`, `delete_region` — regions defined by postal codes or geotarget IDs.
+- `list_local_inventory`, `set_local_inventory`, `delete_local_inventory` — per-store price, availability, quantity, pickup.
+- `list_regional_inventory`, `set_regional_inventory`, `delete_regional_inventory` — per-region price and availability overrides.
+
+### Shipping, returns, promotions
+
+- `get_shipping_settings`, `replace_shipping_settings` — full shipping configuration with etag protection.
+- `list_return_policies`, `get_return_policy` — online return policies.
+- `list_promotions`, `get_promotion`, `upsert_promotion` — promotions and approved promotion writes.
+
+### Diagnostics
+
+- `list_account_issues` — account-level issues.
+- `list_product_issues` — products filtered by aggregated status (disapproved, limited, eligible, pending) with item-level issues.
+- `get_aggregate_product_status` — per-destination, per-country product counts and top issues.
+- `render_account_issues`, `render_product_issues` — human-readable issue explanations and resolution links.
+- `get_api_quota` — daily Merchant API quota and usage.
+
+### Reports and commerce
+
+- `search_merchant_report` — raw Merchant Query Language reports.
+- `get_product_performance` — clicks, impressions, CTR, and conversions for a date range, grouped by offer, brand, category, product type, date, week, country, marketing method, or total.
+- `get_price_insights`, `get_price_competitiveness` — suggested prices and benchmark comparisons.
+- `list_conversion_sources` — conversion sources and state.
+- `list_product_reviews`, `list_merchant_reviews` — uploaded reviews.
+
+### Universal access
+
+- `merchant_api_read` — read any Merchant API route scoped to the configured account.
+- `merchant_api_write` — write any Merchant API route scoped to the configured account after explicit approval.
+- `batch_merchant_writes` — run an approved batch of up to 20 Merchant writes with bounded concurrency.
 
 The universal scoped routes cover account settings, products, data sources, inventories, promotions, shipping, returns, regions, diagnostics, quotas, reports, conversion sources, reviews, local feeds partnership, loyalty, order tracking, Product Studio, and YouTube Shopping endpoints supported by Google Merchant API.
 
@@ -34,7 +66,7 @@ The universal scoped routes cover account settings, products, data sources, inve
 - The service-account JSON, OAuth client secret, and cookie encryption key are Cloudflare Worker secrets and are not stored in this repository.
 - Product writes are restricted to data sources belonging to Merchant account `5844649008`.
 - Every read tool is annotated read-only.
-- Every write tool, including non-destructive updates, is annotated destructive so ChatGPT requests approval before execution.
+- Every write tool, including non-destructive updates, is annotated destructive so the MCP client requests approval before execution.
 - Universal API paths are allowlisted to Google Merchant sub-APIs and must contain only account `5844649008`; cross-account paths, external hosts, traversal, and hidden query strings are rejected.
 - Batch writes are capped at 20 operations and five concurrent requests.
 - Shipping replacement re-reads and verifies the current etag before sending the full replacement.

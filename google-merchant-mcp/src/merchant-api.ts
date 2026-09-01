@@ -53,6 +53,33 @@ function productId(contentLanguage: string, feedLabel: string, offerId: string):
 	return encodeURIComponent(`${contentLanguage}~${feedLabel}~${offerId}`);
 }
 
+function pagedQuery(pageSize: number, pageToken?: string, extra: Record<string, string> = {}): URLSearchParams {
+	const query = new URLSearchParams({ pageSize: String(pageSize), ...extra });
+	if (pageToken) query.set("pageToken", pageToken);
+	return query;
+}
+
+function toMoney(amount: number, currencyCode: string): { amountMicros: string; currencyCode: string } {
+	return {
+		amountMicros: BigInt(Math.round(amount * 1_000_000)).toString(),
+		currencyCode: currencyCode.toUpperCase(),
+	};
+}
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+function assertIsoDate(value: string, label: string): string {
+	if (!ISO_DATE.test(value) || Number.isNaN(Date.parse(value))) {
+		throw new Error(`${label} must be a calendar date in YYYY-MM-DD format.`);
+	}
+	return value;
+}
+
+// Merchant Query Language string literals are single-quoted and backslash-escaped.
+function mqlString(value: string): string {
+	return `'${value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
+}
+
 function isJsonObject(value: unknown): value is JsonObject {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -478,4 +505,452 @@ export function upsertPromotion(env: Env, dataSource: string, promotion: JsonObj
 		method: "POST",
 		body: JSON.stringify({ dataSource, promotion }),
 	});
+}
+
+// ---------------------------------------------------------------------------
+// Account, identity, and settings
+// ---------------------------------------------------------------------------
+
+function accountPath(env: Env, suffix: string): string {
+	return `/accounts/v1/accounts/${env.MERCHANT_ACCOUNT_ID}/${suffix}`;
+}
+
+export function getBusinessInfo(env: Env): Promise<unknown> {
+	return merchantRequest(env, accountPath(env, "businessInfo"));
+}
+
+export function getBusinessIdentity(env: Env): Promise<unknown> {
+	return merchantRequest(env, accountPath(env, "businessIdentity"));
+}
+
+export function getHomepage(env: Env): Promise<unknown> {
+	return merchantRequest(env, accountPath(env, "homepage"));
+}
+
+export function listUsers(env: Env, pageSize: number, pageToken?: string): Promise<unknown> {
+	return merchantRequest(env, `${accountPath(env, "users")}?${pagedQuery(pageSize, pageToken)}`);
+}
+
+export function listAccountRelationships(env: Env, pageSize: number, pageToken?: string): Promise<unknown> {
+	return merchantRequest(env, `${accountPath(env, "relationships")}?${pagedQuery(pageSize, pageToken)}`);
+}
+
+export function listAccountServices(env: Env, pageSize: number, pageToken?: string): Promise<unknown> {
+	return merchantRequest(env, `${accountPath(env, "services")}?${pagedQuery(pageSize, pageToken)}`);
+}
+
+export function getAutomaticImprovements(env: Env): Promise<unknown> {
+	return merchantRequest(env, accountPath(env, "automaticImprovements"));
+}
+
+export function getAutofeedSettings(env: Env): Promise<unknown> {
+	return merchantRequest(env, accountPath(env, "autofeedSettings"));
+}
+
+export function listPrograms(env: Env, pageSize: number, pageToken?: string): Promise<unknown> {
+	return merchantRequest(env, `${accountPath(env, "programs")}?${pagedQuery(pageSize, pageToken)}`);
+}
+
+// ---------------------------------------------------------------------------
+// Regions
+// ---------------------------------------------------------------------------
+
+export type RegionInput = {
+	regionId: string;
+	displayName?: string;
+	regionCode?: string;
+	postalCodes?: string[];
+	geotargetCriteriaIds?: string[];
+};
+
+const REGION_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+
+function assertRegionId(regionId: string): string {
+	if (!REGION_ID_PATTERN.test(regionId)) {
+		throw new Error("region_id may only contain letters, digits, hyphens, and underscores (max 64).");
+	}
+	return regionId;
+}
+
+// Accepts "94108", "9410*", or ranges written as "begin-end" such as "94100-94199" or "94*-95*".
+function parsePostalCodeRange(value: string): { begin: string; end?: string } {
+	const trimmed = value.trim();
+	if (!trimmed) throw new Error("Postal code entries cannot be empty.");
+	const separator = trimmed.indexOf("-");
+	if (separator === -1) return { begin: trimmed };
+	const begin = trimmed.slice(0, separator).trim();
+	const end = trimmed.slice(separator + 1).trim();
+	if (!begin || !end) throw new Error(`Invalid postal code range: ${value}`);
+	return { begin, end };
+}
+
+export function buildRegionBody(input: RegionInput): JsonObject {
+	const hasPostal = Boolean(input.postalCodes?.length);
+	const hasGeo = Boolean(input.geotargetCriteriaIds?.length);
+	if (hasPostal === hasGeo) {
+		throw new Error("Provide exactly one of postal_codes or geotarget_criteria_ids.");
+	}
+	const body: JsonObject = {};
+	if (input.displayName) body.displayName = input.displayName;
+	if (hasPostal) {
+		if (!input.regionCode) throw new Error("region_code is required when defining a region by postal codes.");
+		body.postalCodeArea = {
+			regionCode: input.regionCode.toUpperCase(),
+			postalCodes: input.postalCodes!.map((entry): JsonObject => {
+				const range = parsePostalCodeRange(entry);
+				return range.end ? { begin: range.begin, end: range.end } : { begin: range.begin };
+			}),
+		};
+	} else {
+		body.geotargetArea = { geotargetCriteriaIds: input.geotargetCriteriaIds! };
+	}
+	return body;
+}
+
+export function listRegions(env: Env, pageSize: number, pageToken?: string): Promise<unknown> {
+	return merchantRequest(env, `${accountPath(env, "regions")}?${pagedQuery(pageSize, pageToken)}`);
+}
+
+export function getRegion(env: Env, regionId: string): Promise<unknown> {
+	return merchantRequest(env, accountPath(env, `regions/${encodeURIComponent(assertRegionId(regionId))}`));
+}
+
+async function regionExists(env: Env, regionId: string): Promise<boolean> {
+	try {
+		await getRegion(env, regionId);
+		return true;
+	} catch (error) {
+		if (error instanceof Error && /HTTP 404/.test(error.message)) return false;
+		throw error;
+	}
+}
+
+export async function upsertRegion(env: Env, input: RegionInput): Promise<unknown> {
+	const regionId = assertRegionId(input.regionId);
+	const body = buildRegionBody(input);
+	if (await regionExists(env, regionId)) {
+		const query = new URLSearchParams({ updateMask: Object.keys(body).join(",") });
+		return merchantRequest(env, `${accountPath(env, `regions/${encodeURIComponent(regionId)}`)}?${query}`, {
+			method: "PATCH",
+			body: JSON.stringify({ name: `accounts/${env.MERCHANT_ACCOUNT_ID}/regions/${regionId}`, ...body }),
+		});
+	}
+	const query = new URLSearchParams({ regionId });
+	return merchantRequest(env, `${accountPath(env, "regions")}?${query}`, {
+		method: "POST",
+		body: JSON.stringify(body),
+	});
+}
+
+export function deleteRegion(env: Env, regionId: string): Promise<unknown> {
+	return merchantRequest(env, accountPath(env, `regions/${encodeURIComponent(assertRegionId(regionId))}`), {
+		method: "DELETE",
+	});
+}
+
+// ---------------------------------------------------------------------------
+// Local and regional inventory
+// ---------------------------------------------------------------------------
+
+export type ProductKey = { contentLanguage: string; feedLabel: string; offerId: string };
+
+export type LocalInventoryInput = ProductKey & {
+	storeCode: string;
+	availability?: "IN_STOCK" | "LIMITED_AVAILABILITY" | "ON_DISPLAY_TO_ORDER" | "OUT_OF_STOCK";
+	price?: number;
+	salePrice?: number;
+	currencyCode?: string;
+	quantity?: number;
+	pickupMethod?: "BUY" | "RESERVE" | "SHIP_TO_STORE" | "NOT_SUPPORTED";
+	pickupSla?:
+		| "SAME_DAY"
+		| "NEXT_DAY"
+		| "TWO_DAY"
+		| "THREE_DAY"
+		| "FOUR_DAY"
+		| "FIVE_DAY"
+		| "SIX_DAY"
+		| "SEVEN_DAY"
+		| "MULTI_WEEK";
+	instoreProductLocation?: string;
+};
+
+export type RegionalInventoryInput = ProductKey & {
+	region: string;
+	availability?: "IN_STOCK" | "OUT_OF_STOCK";
+	price?: number;
+	salePrice?: number;
+	currencyCode?: string;
+};
+
+function inventoryPath(env: Env, key: ProductKey, suffix: string): string {
+	const id = productId(key.contentLanguage, key.feedLabel, key.offerId);
+	return `/inventories/v1/accounts/${env.MERCHANT_ACCOUNT_ID}/products/${id}/${suffix}`;
+}
+
+function priceAttributes(price?: number, salePrice?: number, currencyCode?: string): JsonObject {
+	const attributes: JsonObject = {};
+	if (price === undefined && salePrice === undefined) return attributes;
+	if (!currencyCode) throw new Error("currency_code is required when setting a price or sale price.");
+	if (price !== undefined) attributes.price = toMoney(price, currencyCode);
+	if (salePrice !== undefined) attributes.salePrice = toMoney(salePrice, currencyCode);
+	return attributes;
+}
+
+export function listLocalInventory(env: Env, key: ProductKey, pageSize: number, pageToken?: string): Promise<unknown> {
+	return merchantRequest(env, `${inventoryPath(env, key, "localInventories")}?${pagedQuery(pageSize, pageToken)}`);
+}
+
+export function setLocalInventory(env: Env, input: LocalInventoryInput): Promise<unknown> {
+	if ((input.pickupMethod && input.pickupMethod !== "NOT_SUPPORTED") !== Boolean(input.pickupSla)) {
+		throw new Error("pickup_method and pickup_sla must be provided together (unless pickup_method is NOT_SUPPORTED).");
+	}
+	const attributes: JsonObject = priceAttributes(input.price, input.salePrice, input.currencyCode);
+	if (input.availability) attributes.availability = input.availability;
+	if (input.quantity !== undefined) attributes.quantity = String(input.quantity);
+	if (input.pickupMethod) attributes.pickupMethod = input.pickupMethod;
+	if (input.pickupSla) attributes.pickupSla = input.pickupSla;
+	if (input.instoreProductLocation) attributes.instoreProductLocation = input.instoreProductLocation;
+	if (!Object.keys(attributes).length) throw new Error("Provide at least one inventory attribute to set.");
+	return merchantRequest(env, inventoryPath(env, input, "localInventories:insert"), {
+		method: "POST",
+		body: JSON.stringify({ storeCode: input.storeCode, localInventoryAttributes: attributes }),
+	});
+}
+
+export function deleteLocalInventory(env: Env, key: ProductKey, storeCode: string): Promise<unknown> {
+	return merchantRequest(env, inventoryPath(env, key, `localInventories/${encodeURIComponent(storeCode)}`), {
+		method: "DELETE",
+	});
+}
+
+export function listRegionalInventory(
+	env: Env,
+	key: ProductKey,
+	pageSize: number,
+	pageToken?: string,
+): Promise<unknown> {
+	return merchantRequest(env, `${inventoryPath(env, key, "regionalInventories")}?${pagedQuery(pageSize, pageToken)}`);
+}
+
+export function setRegionalInventory(env: Env, input: RegionalInventoryInput): Promise<unknown> {
+	const attributes: JsonObject = priceAttributes(input.price, input.salePrice, input.currencyCode);
+	if (input.availability) attributes.availability = input.availability;
+	if (!Object.keys(attributes).length) throw new Error("Provide at least one inventory attribute to set.");
+	return merchantRequest(env, inventoryPath(env, input, "regionalInventories:insert"), {
+		method: "POST",
+		body: JSON.stringify({ region: assertRegionId(input.region), regionalInventoryAttributes: attributes }),
+	});
+}
+
+export function deleteRegionalInventory(env: Env, key: ProductKey, region: string): Promise<unknown> {
+	return merchantRequest(
+		env,
+		inventoryPath(env, key, `regionalInventories/${encodeURIComponent(assertRegionId(region))}`),
+		{ method: "DELETE" },
+	);
+}
+
+// ---------------------------------------------------------------------------
+// Diagnostics: product issues, aggregate status, rendered issue guidance, quota
+// ---------------------------------------------------------------------------
+
+export const PRODUCT_STATUS_FILTERS = [
+	"ALL",
+	"NOT_ELIGIBLE_OR_DISAPPROVED",
+	"ELIGIBLE_LIMITED",
+	"ELIGIBLE",
+	"PENDING",
+] as const;
+
+export type ProductStatusFilter = (typeof PRODUCT_STATUS_FILTERS)[number];
+
+export function listProductIssues(
+	env: Env,
+	status: ProductStatusFilter,
+	pageSize: number,
+	pageToken?: string,
+): Promise<unknown> {
+	const fields = [
+		"id",
+		"offer_id",
+		"title",
+		"brand",
+		"feed_label",
+		"language_code",
+		"availability",
+		"price",
+		"aggregated_reporting_context_status",
+		"item_issues",
+		"click_potential",
+	];
+	const where = status === "ALL" ? "" : ` WHERE aggregated_reporting_context_status = ${mqlString(status)}`;
+	const query = `SELECT ${fields.join(", ")} FROM product_view${where}`;
+	return searchMerchantReport(env, query, pageSize, pageToken);
+}
+
+export function listAggregateProductStatuses(
+	env: Env,
+	pageSize: number,
+	pageToken?: string,
+	reportingContext?: string,
+	country?: string,
+): Promise<unknown> {
+	const clauses: string[] = [];
+	if (reportingContext) {
+		if (!/^[A-Z_]{1,64}$/.test(reportingContext)) throw new Error("reporting_context must be an upper-case enum name.");
+		clauses.push(`reporting_context = "${reportingContext}"`);
+	}
+	if (country) {
+		if (!/^[A-Z]{2}$/.test(country)) throw new Error("country must be a two-letter CLDR region code.");
+		clauses.push(`country = "${country}"`);
+	}
+	const extra: Record<string, string> = clauses.length ? { filter: clauses.join(" AND ") } : {};
+	return merchantRequest(
+		env,
+		`/issueresolution/v1/accounts/${env.MERCHANT_ACCOUNT_ID}/aggregateProductStatuses?${pagedQuery(pageSize, pageToken, extra)}`,
+	);
+}
+
+function renderQuery(languageCode: string, timeZone?: string): URLSearchParams {
+	const query = new URLSearchParams({ languageCode });
+	if (timeZone) query.set("timeZone", timeZone);
+	return query;
+}
+
+export function renderAccountIssues(env: Env, languageCode: string, timeZone?: string): Promise<unknown> {
+	return merchantRequest(
+		env,
+		`/issueresolution/v1/accounts/${env.MERCHANT_ACCOUNT_ID}:renderaccountissues?${renderQuery(languageCode, timeZone)}`,
+		{ method: "POST", body: JSON.stringify({ contentOption: "PRE_RENDERED_HTML" }) },
+	);
+}
+
+export function renderProductIssues(env: Env, key: ProductKey, languageCode: string, timeZone?: string): Promise<unknown> {
+	const id = productId(key.contentLanguage, key.feedLabel, key.offerId);
+	return merchantRequest(
+		env,
+		`/issueresolution/v1/accounts/${env.MERCHANT_ACCOUNT_ID}/products/${id}:renderproductissues?${renderQuery(languageCode, timeZone)}`,
+		{ method: "POST", body: JSON.stringify({ contentOption: "PRE_RENDERED_HTML" }) },
+	);
+}
+
+export function getApiQuota(env: Env, pageSize: number, pageToken?: string): Promise<unknown> {
+	return merchantRequest(env, `/quota/v1/accounts/${env.MERCHANT_ACCOUNT_ID}/quotas?${pagedQuery(pageSize, pageToken)}`);
+}
+
+// ---------------------------------------------------------------------------
+// Conversions and reviews
+// ---------------------------------------------------------------------------
+
+export function listConversionSources(
+	env: Env,
+	pageSize: number,
+	pageToken?: string,
+	showDeleted = false,
+): Promise<unknown> {
+	const extra: Record<string, string> = showDeleted ? { showDeleted: "true" } : {};
+	return merchantRequest(
+		env,
+		`/conversions/v1/accounts/${env.MERCHANT_ACCOUNT_ID}/conversionSources?${pagedQuery(pageSize, pageToken, extra)}`,
+	);
+}
+
+export function listProductReviews(env: Env, pageSize: number, pageToken?: string): Promise<unknown> {
+	return merchantRequest(
+		env,
+		`/reviews/v1alpha/accounts/${env.MERCHANT_ACCOUNT_ID}/productReviews?${pagedQuery(pageSize, pageToken)}`,
+	);
+}
+
+export function listMerchantReviews(env: Env, pageSize: number, pageToken?: string): Promise<unknown> {
+	return merchantRequest(
+		env,
+		`/reviews/v1alpha/accounts/${env.MERCHANT_ACCOUNT_ID}/merchantReviews?${pagedQuery(pageSize, pageToken)}`,
+	);
+}
+
+// ---------------------------------------------------------------------------
+// Shaped reports: performance, price insights, price competitiveness
+// ---------------------------------------------------------------------------
+
+export const PERFORMANCE_GROUPING_NAMES = [
+	"total",
+	"offer",
+	"brand",
+	"category",
+	"product_type",
+	"date",
+	"week",
+	"country",
+	"marketing_method",
+] as const;
+
+export type PerformanceGrouping = (typeof PERFORMANCE_GROUPING_NAMES)[number];
+
+const PERFORMANCE_GROUPINGS: Record<PerformanceGrouping, readonly string[]> = {
+	total: [],
+	offer: ["offer_id", "title"],
+	brand: ["brand"],
+	category: ["category_l1", "category_l2"],
+	product_type: ["product_type_l1", "product_type_l2"],
+	date: ["date"],
+	week: ["week"],
+	country: ["customer_country_code"],
+	marketing_method: ["marketing_method"],
+};
+
+export const PERFORMANCE_METRICS = ["clicks", "impressions", "conversions"] as const;
+export type PerformanceMetric = (typeof PERFORMANCE_METRICS)[number];
+
+export type ProductPerformanceInput = {
+	startDate: string;
+	endDate: string;
+	groupBy: PerformanceGrouping;
+	orderBy: PerformanceMetric;
+	limit: number;
+	marketingMethod?: "ADS" | "ORGANIC";
+	pageToken?: string;
+};
+
+export function buildProductPerformanceQuery(input: ProductPerformanceInput): string {
+	const start = assertIsoDate(input.startDate, "start_date");
+	const end = assertIsoDate(input.endDate, "end_date");
+	if (start > end) throw new Error("start_date must not be after end_date.");
+	const segments = PERFORMANCE_GROUPINGS[input.groupBy];
+	const metrics = ["clicks", "impressions", "click_through_rate", "conversions", "conversion_rate"];
+	const where = [`date BETWEEN ${mqlString(start)} AND ${mqlString(end)}`];
+	if (input.marketingMethod) where.push(`marketing_method = ${mqlString(input.marketingMethod)}`);
+	const orderBy = segments.length ? ` ORDER BY ${input.orderBy} DESC` : "";
+	return `SELECT ${[...segments, ...metrics].join(", ")} FROM product_performance_view WHERE ${where.join(" AND ")}${orderBy} LIMIT ${input.limit}`;
+}
+
+export function getProductPerformance(env: Env, input: ProductPerformanceInput): Promise<unknown> {
+	return searchMerchantReport(env, buildProductPerformanceQuery(input), input.limit, input.pageToken);
+}
+
+export function getPriceInsights(env: Env, pageSize: number, pageToken?: string): Promise<unknown> {
+	const fields = [
+		"id",
+		"offer_id",
+		"title",
+		"brand",
+		"price",
+		"suggested_price",
+		"predicted_impressions_change_fraction",
+		"predicted_clicks_change_fraction",
+		"predicted_conversions_change_fraction",
+		"effectiveness",
+	];
+	return searchMerchantReport(env, `SELECT ${fields.join(", ")} FROM price_insights_product_view`, pageSize, pageToken);
+}
+
+export function getPriceCompetitiveness(env: Env, pageSize: number, pageToken?: string): Promise<unknown> {
+	const fields = ["id", "offer_id", "title", "brand", "price", "benchmark_price", "report_country_code"];
+	return searchMerchantReport(
+		env,
+		`SELECT ${fields.join(", ")} FROM price_competitiveness_product_view`,
+		pageSize,
+		pageToken,
+	);
 }
