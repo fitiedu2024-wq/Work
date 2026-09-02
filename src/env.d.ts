@@ -1,0 +1,7 @@
+interface Env {
+	GOOGLE_SERVICE_ACCOUNT_JSON: string;
+	GOOGLE_CLIENT_ID: string;
+	GOOGLE_CLIENT_SECRET: string;
+	COOKIE_ENCRYPTION_KEY: string;
+	HOSTED_DOMAIN?: string;
+}
