@@ -49,17 +49,17 @@ function encodeBase64Url(value: string): string {
 	return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
-function productId(contentLanguage: string, feedLabel: string, offerId: string): string {
+export function productId(contentLanguage: string, feedLabel: string, offerId: string): string {
 	return encodeURIComponent(`${contentLanguage}~${feedLabel}~${offerId}`);
 }
 
-function pagedQuery(pageSize: number, pageToken?: string, extra: Record<string, string> = {}): URLSearchParams {
+export function pagedQuery(pageSize: number, pageToken?: string, extra: Record<string, string> = {}): URLSearchParams {
 	const query = new URLSearchParams({ pageSize: String(pageSize), ...extra });
 	if (pageToken) query.set("pageToken", pageToken);
 	return query;
 }
 
-function toMoney(amount: number, currencyCode: string): { amountMicros: string; currencyCode: string } {
+export function toMoney(amount: number, currencyCode: string): { amountMicros: string; currencyCode: string } {
 	return {
 		amountMicros: BigInt(Math.round(amount * 1_000_000)).toString(),
 		currencyCode: currencyCode.toUpperCase(),
@@ -68,7 +68,7 @@ function toMoney(amount: number, currencyCode: string): { amountMicros: string; 
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
-function assertIsoDate(value: string, label: string): string {
+export function assertIsoDate(value: string, label: string): string {
 	if (!ISO_DATE.test(value) || Number.isNaN(Date.parse(value))) {
 		throw new Error(`${label} must be a calendar date in YYYY-MM-DD format.`);
 	}
@@ -76,11 +76,11 @@ function assertIsoDate(value: string, label: string): string {
 }
 
 // Merchant Query Language string literals are single-quoted and backslash-escaped.
-function mqlString(value: string): string {
+export function mqlString(value: string): string {
 	return `'${value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
 }
 
-function isJsonObject(value: unknown): value is JsonObject {
+export function isJsonObject(value: unknown): value is JsonObject {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -108,7 +108,7 @@ export function parseJsonObjectArray(value: string, label = "items_json"): JsonO
 	return parsed;
 }
 
-function assertAccountResource(env: Env, resource: string, collection: string): void {
+export function assertAccountResource(env: Env, resource: string, collection: string): void {
 	const prefix = `accounts/${env.MERCHANT_ACCOUNT_ID}/${collection}/`;
 	if (!resource.startsWith(prefix)) {
 		throw new Error(`The resource must belong to Merchant account ${env.MERCHANT_ACCOUNT_ID}.`);
@@ -202,7 +202,7 @@ async function getGoogleAccessToken(env: Env, forceRefresh = false): Promise<str
 	return token.access_token;
 }
 
-async function merchantRequest<T>(env: Env, path: string, init: RequestInit = {}, retry = true): Promise<T> {
+export async function merchantRequest<T>(env: Env, path: string, init: RequestInit = {}, retry = true): Promise<T> {
 	const accessToken = await getGoogleAccessToken(env, !retry);
 	const headers = new Headers(init.headers);
 	headers.set("Authorization", `Bearer ${accessToken}`);
@@ -511,7 +511,7 @@ export function upsertPromotion(env: Env, dataSource: string, promotion: JsonObj
 // Account, identity, and settings
 // ---------------------------------------------------------------------------
 
-function accountPath(env: Env, suffix: string): string {
+export function accountPath(env: Env, suffix: string): string {
 	return `/accounts/v1/accounts/${env.MERCHANT_ACCOUNT_ID}/${suffix}`;
 }
 
@@ -819,11 +819,18 @@ function renderQuery(languageCode: string, timeZone?: string): URLSearchParams {
 	return query;
 }
 
+// Asking for built-in user-input actions makes Google return the action context and flow IDs
+// that trigger_issue_action needs (for example to request a re-review).
+const RENDER_ISSUES_BODY = JSON.stringify({
+	contentOption: "PRE_RENDERED_HTML",
+	userInputActionOption: "BUILT_IN_USER_INPUT_ACTIONS",
+});
+
 export function renderAccountIssues(env: Env, languageCode: string, timeZone?: string): Promise<unknown> {
 	return merchantRequest(
 		env,
 		`/issueresolution/v1/accounts/${env.MERCHANT_ACCOUNT_ID}:renderaccountissues?${renderQuery(languageCode, timeZone)}`,
-		{ method: "POST", body: JSON.stringify({ contentOption: "PRE_RENDERED_HTML" }) },
+		{ method: "POST", body: RENDER_ISSUES_BODY },
 	);
 }
 
@@ -832,7 +839,7 @@ export function renderProductIssues(env: Env, key: ProductKey, languageCode: str
 	return merchantRequest(
 		env,
 		`/issueresolution/v1/accounts/${env.MERCHANT_ACCOUNT_ID}/products/${id}:renderproductissues?${renderQuery(languageCode, timeZone)}`,
-		{ method: "POST", body: JSON.stringify({ contentOption: "PRE_RENDERED_HTML" }) },
+		{ method: "POST", body: RENDER_ISSUES_BODY },
 	);
 }
 

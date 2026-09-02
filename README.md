@@ -50,13 +50,57 @@ A remote, OAuth-protected MCP server for the `layaldress.com` Google Merchant Ce
 - `list_conversion_sources` — conversion sources and state.
 - `list_product_reviews`, `list_merchant_reviews` — uploaded reviews.
 
+### Product Studio
+
+- `generate_product_text_suggestions` — AI title and description suggestions from attributes and an optional image.
+- `upscale_product_image`, `remove_product_image_background`, `generate_product_image_background` — image fixes and generation; each returns a hosted image URI.
+
+### Data sources and feeds
+
+- `get_data_source`, `create_data_source`, `update_data_source`, `delete_data_source` — data source management (approval required for writes).
+- `fetch_data_source` — trigger an immediate fetch of a scheduled data source.
+- `get_file_upload_status` — latest upload or fetch result with item counts and issues.
+
+### Issue resolution and notifications
+
+- `trigger_issue_action` — run a built-in action (for example request re-review) using the `action_context` and `action_flow_id` returned by `render_account_issues` / `render_product_issues`.
+- `list_notification_subscriptions`, `get_notification_subscription`, `create_notification_subscription`, `update_notification_subscription`, `delete_notification_subscription` — product status and account service webhooks.
+
+### Additional reports
+
+- `get_best_sellers` — best-selling product clusters or brands by country, category, and week or month.
+- `get_competitive_visibility` — competitor, top-merchant, and benchmark visibility views.
+- `get_non_product_performance` — clicks, impressions, and CTR for non-product surfaces.
+
+### Account, program, and user writes
+
+- `update_business_info`, `update_business_identity` — patch business details and identity attributes.
+- `update_homepage`, `claim_homepage`, `unclaim_homepage` — homepage URL and claim.
+- `update_autofeed_settings`, `update_automatic_improvements` — crawling and automatic improvement flags.
+- `get_program`, `enable_program`, `disable_program` — program participation.
+- `get_checkout_settings`, `create_checkout_settings`, `update_checkout_settings`, `delete_checkout_settings` — checkout URL settings per program.
+- `get_user`, `create_user`, `update_user`, `delete_user` — account access.
+- `get_email_preferences`, `update_email_preferences` — news and tips opt-in.
+- `get_ucp_settings`, `update_ucp_settings` — Universal Commerce Protocol settings.
+- `create_return_policy`, `update_return_policy`, `delete_return_policy` — return policy writes.
+- `list_subaccounts`, `get_terms_of_service_state`, `retrieve_latest_terms_of_service`, `accept_terms_of_service` — account structure and terms.
+- `list_gbp_accounts`, `link_gbp_account` — Business Profile links.
+- `list_omnichannel_settings`, `get_omnichannel_setting`, `create_omnichannel_setting`, `update_omnichannel_setting`, `request_inventory_verification` — omnichannel setup.
+
+### Commerce signals, conversions, reviews, and local feeds
+
+- `create_order_tracking_signal` — shipment and delivery signals for shipping-speed annotations.
+- `get_conversion_source`, `create_conversion_source`, `update_conversion_source`, `delete_conversion_source`, `undelete_conversion_source` — conversion sources.
+- `get_product_review`, `insert_product_review`, `delete_product_review`, `get_merchant_review`, `insert_merchant_review`, `delete_merchant_review` — review uploads.
+- `list_lfp_stores`, `get_lfp_store`, `insert_lfp_store`, `delete_lfp_store`, `insert_lfp_inventory`, `insert_lfp_sale`, `get_lfp_merchant_state` — local feeds partnership.
+
 ### Universal access
 
 - `merchant_api_read` — read any Merchant API route scoped to the configured account.
 - `merchant_api_write` — write any Merchant API route scoped to the configured account after explicit approval.
 - `batch_merchant_writes` — run an approved batch of up to 20 Merchant writes with bounded concurrency.
 
-The universal scoped routes cover account settings, products, data sources, inventories, promotions, shipping, returns, regions, diagnostics, quotas, reports, conversion sources, reviews, local feeds partnership, loyalty, order tracking, Product Studio, and YouTube Shopping endpoints supported by Google Merchant API.
+The universal scoped routes also cover the remaining endpoints without a dedicated tool, such as loyalty customer matching and YouTube Shopping commission groups and contracts.
 
 ## Security model
 

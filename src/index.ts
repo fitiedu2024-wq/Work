@@ -2,6 +2,7 @@ import OAuthProvider from "@cloudflare/workers-oauth-provider";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { McpAgent } from "agents/mcp";
 import { z } from "zod";
+import { registerExtendedTools } from "./extended-tools";
 import { GoogleHandler } from "./google-handler";
 import {
 	deleteLocalInventory,
@@ -102,13 +103,60 @@ const PRODUCT_PATCH_FIELDS = [
 ] as const;
 
 const CAPABILITY_CATALOG = {
-	account: ["account details", "business info and identity", "homepage", "users", "relationships", "services"],
-	settings: ["automatic improvements", "autofeed", "programs", "checkout", "shipping", "returns", "regions"],
-	catalog: ["products", "partial product updates", "bulk product writes", "data sources", "file upload status"],
-	commerce: ["promotions", "local inventory", "regional inventory", "conversion sources"],
-	diagnostics: ["account issues", "product issues", "aggregate product status", "issue resolution", "API quotas and limits"],
-	reports: ["product performance", "disapproved products", "market insights", "price insights", "competitive visibility"],
-	advanced: ["product and merchant reviews", "local feeds partnership", "loyalty customers", "order tracking", "Product Studio", "YouTube shopping"],
+	account: [
+		"account details",
+		"business info and identity (read and update)",
+		"homepage (read, update, claim, unclaim)",
+		"users and email preferences (read and manage)",
+		"relationships",
+		"services",
+		"sub-accounts",
+		"terms of service (state, latest, accept)",
+		"Business Profile links",
+	],
+	settings: [
+		"automatic improvements (read and update)",
+		"autofeed (read and update)",
+		"programs (read, enable, disable)",
+		"checkout settings (read and manage)",
+		"Universal Commerce Protocol settings",
+		"shipping",
+		"returns (read and manage)",
+		"regions",
+		"omnichannel settings and inventory verification",
+	],
+	catalog: [
+		"products",
+		"partial product updates",
+		"bulk product writes",
+		"data sources (read, create, update, delete, fetch now)",
+		"file upload status",
+	],
+	commerce: ["promotions", "local inventory", "regional inventory", "conversion sources (read and manage)", "order tracking signals"],
+	diagnostics: [
+		"account issues",
+		"product issues",
+		"aggregate product status",
+		"issue resolution with built-in actions (re-review requests)",
+		"API quotas and limits",
+		"notification subscriptions (webhooks)",
+	],
+	reports: [
+		"product performance",
+		"non-product performance",
+		"disapproved products",
+		"best sellers (product clusters and brands)",
+		"price insights",
+		"price competitiveness",
+		"competitive visibility (competitors, top merchants, benchmark)",
+	],
+	product_studio: ["title and description suggestions", "image upscaling", "background removal", "background generation"],
+	advanced: [
+		"product and merchant reviews (read and manage)",
+		"local feeds partnership (stores, inventory, sales, merchant state)",
+		"loyalty customers (via merchant_api_write)",
+		"YouTube shopping (via merchant_api_read and merchant_api_write)",
+	],
 	privacy: "Customer, loyalty, and order data can contain personal information. Read it only when the user explicitly asks for it.",
 	writes: "Every write route is exposed only through merchant_api_write or a dedicated write tool marked destructive, so the MCP client must request approval.",
 };
@@ -133,7 +181,7 @@ const NON_NEGATIVE_MONEY = z.number().min(0).max(10_000_000);
 export class MyMCP extends McpAgent<Env, Record<string, never>, Props> {
 	server = new McpServer({
 		name: "Google Merchant Manager",
-		version: "1.0.0",
+		version: "1.1.0",
 	});
 
 	async init() {
@@ -1031,6 +1079,10 @@ export class MyMCP extends McpAgent<Env, Record<string, never>, Props> {
 			},
 			async ({ page_size, page_token }) => textResult(await getPriceCompetitiveness(this.env, page_size, page_token)),
 		);
+
+		// Product Studio, data sources, notifications, extra reports, account writes, reviews, LFP,
+		// terms of service, Business Profile, and omnichannel tools live in extended-tools.ts.
+		registerExtendedTools(this.server, this.env);
 	}
 }
 
