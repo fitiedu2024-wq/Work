@@ -1,6 +1,14 @@
 /**
  * For more details on how to configure Wrangler, refer to:
  * https://developers.cloudflare.com/workers/wrangler/configuration/
+ *
+ * One codebase, one Worker per Merchant Center account:
+ *   - top level  -> Layal Dress            (npx wrangler deploy)
+ *   - env.asom   -> Asom Fashion           (npx wrangler deploy --env asom)
+ *
+ * Bindings and vars are NOT inherited by environments, so every account
+ * environment must redefine `durable_objects`, `kv_namespaces` and `vars`.
+ * To add another store, copy the `asom` block and change name / KV id / vars.
  */
 {
   "$schema": "node_modules/wrangler/config-schema.json",
@@ -38,5 +46,28 @@
   },
   "dev": {
     "port": 8788
+  },
+  "env": {
+    "asom": {
+      "name": "google-merchant-asom-fashion-mcp",
+      "durable_objects": {
+        "bindings": [
+          {
+            "class_name": "MyMCP",
+            "name": "MCP_OBJECT"
+          }
+        ]
+      },
+      "kv_namespaces": [
+        {
+          "binding": "OAUTH_KV",
+          "id": "7863155260b14ca7834ecc64b693c851"
+        }
+      ],
+      "vars": {
+        "MERCHANT_ACCOUNT_ID": "5362919336",
+        "ALLOWED_GOOGLE_EMAIL": "a.3ayoty89@gmail.com"
+      }
+    }
   }
 }

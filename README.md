@@ -1,10 +1,15 @@
 # Google Merchant MCP
 
-A remote, OAuth-protected MCP server for the `layaldress.com` Google Merchant Center account. Works with any MCP client that supports remote OAuth servers (Cursor, ChatGPT, Claude, and others).
+A remote, OAuth-protected MCP server for Google Merchant Center accounts. Works with any MCP client that supports remote OAuth servers (Cursor, ChatGPT, Claude, and others).
 
-## Remote endpoint
+One codebase is deployed as one Cloudflare Worker per Merchant Center account. Each account is a Wrangler environment in `wrangler.jsonc`; the code is identical, only the Worker name, OAuth KV namespace, and `MERCHANT_ACCOUNT_ID` differ.
 
-`https://google-merchant-mcp.google-merchant-mcp.workers.dev/mcp`
+## Deployments
+
+| Store | Merchant account | Wrangler environment | Remote endpoint |
+| --- | --- | --- | --- |
+| Layal Dress (`layaldress.com`) | `5844649008` | top level (default) | `https://google-merchant-mcp.google-merchant-mcp.workers.dev/mcp` |
+| Asom Fashion | `5362919336` | `asom` | `https://google-merchant-asom-fashion-mcp.google-merchant-mcp.workers.dev/mcp` |
 
 ## Included tools
 
@@ -108,10 +113,10 @@ The universal scoped routes also cover the remaining endpoints without a dedicat
 - Google login is restricted to `a.3ayoty89@gmail.com`.
 - Merchant API calls use the dedicated service account.
 - The service-account JSON, OAuth client secret, and cookie encryption key are Cloudflare Worker secrets and are not stored in this repository.
-- Product writes are restricted to data sources belonging to Merchant account `5844649008`.
+- Product writes are restricted to data sources belonging to the Merchant account configured in `MERCHANT_ACCOUNT_ID` for that deployment.
 - Every read tool is annotated read-only.
 - Every write tool, including non-destructive updates, is annotated destructive so the MCP client requests approval before execution.
-- Universal API paths are allowlisted to Google Merchant sub-APIs and must contain only account `5844649008`; cross-account paths, external hosts, traversal, and hidden query strings are rejected.
+- Universal API paths are allowlisted to Google Merchant sub-APIs and must contain only the configured account; cross-account paths, external hosts, traversal, and hidden query strings are rejected.
 - Batch writes are capped at 20 operations and five concurrent requests.
 - Shipping replacement re-reads and verifies the current etag before sending the full replacement.
 
@@ -125,21 +130,35 @@ npm run dev
 
 ## Deploy
 
-The Worker is connected to this repository through Cloudflare Workers Builds. Every push to the production branch installs dependencies and runs `npx wrangler deploy` from the repository root, so the project must stay at the root.
+Both Workers are connected to this repository through Cloudflare Workers Builds and watch the `main` branch. Every push to `main` installs dependencies and deploys from the repository root, so the project must stay at the root.
+
+| Worker | Deploy command |
+| --- | --- |
+| `google-merchant-mcp` (Layal) | `npx wrangler deploy` |
+| `google-merchant-asom-fashion-mcp` (Asom) | `npx wrangler deploy --env asom` |
 
 To deploy manually instead:
 
 ```sh
-npm run deploy
+npm run deploy              # Layal
+npm run deploy:asom         # Asom Fashion
 ```
 
-Required Worker secrets:
+Required Worker secrets (set separately on each Worker):
 
 - `GOOGLE_SERVICE_ACCOUNT_JSON`
 - `GOOGLE_CLIENT_ID`
 - `GOOGLE_CLIENT_SECRET`
 - `COOKIE_ENCRYPTION_KEY`
 
-The Google OAuth Web client must allow this callback:
+The Google OAuth Web client must allow each Worker's callback:
 
-`https://google-merchant-mcp.google-merchant-mcp.workers.dev/callback`
+- `https://google-merchant-mcp.google-merchant-mcp.workers.dev/callback`
+- `https://google-merchant-asom-fashion-mcp.google-merchant-mcp.workers.dev/callback`
+
+### Adding another store
+
+1. Create a KV namespace for its OAuth state.
+2. Add an `env.<store>` block in `wrangler.jsonc` with its own `name`, `kv_namespaces`, `vars`, and the `durable_objects` binding.
+3. Create the Worker in Cloudflare, connect it to this repository on `main`, and set the deploy command to `npx wrangler deploy --env <store>`.
+4. Set the four secrets on the new Worker and allow its callback URL in the Google OAuth client.
