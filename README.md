@@ -156,9 +156,56 @@ The Google OAuth Web client must allow each Worker's callback:
 - `https://google-merchant-mcp.google-merchant-mcp.workers.dev/callback`
 - `https://google-merchant-asom-fashion-mcp.google-merchant-mcp.workers.dev/callback`
 
+### Branch policy
+
+- `main` is the only long-lived branch. Every push to `main` deploys **all** stores at once, because every Worker watches `main`.
+- Never create a branch per store or a separate repository per store. The stores share identical code; only `wrangler.jsonc` environments differ. A per-store branch drifts from `main` and forces a manual merge for every new tool.
+- Work on short-lived feature branches and merge through a pull request. Pushes to non-`main` branches only upload preview versions (`npx wrangler versions upload`, with `--env <store>` on the store Workers) and never change production traffic.
+- Do not push a change to `main` that removes or renames an `env.<store>` block while a Worker still deploys with `--env <store>`; that Worker's build will fail.
+
+### Workers Builds configuration
+
+Each Worker has two triggers in Cloudflare Workers Builds. All of them use root directory `/` and an empty build command.
+
+| Worker | Trigger | Branches | Deploy command |
+| --- | --- | --- | --- |
+| `google-merchant-mcp` | Production | `main` | `npx wrangler deploy` |
+| `google-merchant-mcp` | Preview | all except `main` | `npx wrangler versions upload` |
+| `google-merchant-asom-fashion-mcp` | Production | `main` | `npx wrangler deploy --env asom` |
+| `google-merchant-asom-fashion-mcp` | Preview | all except `main` | `npx wrangler versions upload --env asom` |
+
+The `--env` flag on the preview trigger matters: without it, a store Worker's preview build would upload a version to the Layal Worker, because the top-level `name` in `wrangler.jsonc` is `google-merchant-mcp`.
+
+### Verifying a deploy
+
+After a push to `main`, check each Worker:
+
+1. **Build**: Cloudflare dashboard → Workers & Pages → the Worker → Deployments/Builds. The latest build for the merge commit must be `success` and show the expected deploy command.
+2. **Bindings**: Settings → Variables and Secrets. `MERCHANT_ACCOUNT_ID` and `OAUTH_KV` must match the row for that store in the Deployments table above, and the four secrets must still be present.
+3. **Service**: `GET https://<worker>.google-merchant-mcp.workers.dev/.well-known/oauth-authorization-server` must return JSON whose `issuer` is that Worker's own URL.
+4. **MCP client**: reconnect the store's MCP server in Claude/Cursor and run a read-only tool such as `get_merchant_account`; the returned account ID must be the store's.
+
+Wrangler can validate the configuration before pushing:
+
+```sh
+npx wrangler deploy --dry-run              # Layal bindings
+npx wrangler deploy --dry-run --env asom   # Asom bindings
+```
+
+### Rolling back
+
+Each Worker keeps its own version history. In the Cloudflare dashboard open the Worker → Deployments, pick the previous version and roll back. Rolling back one store does not affect the other, and the repository stays on `main`. Fix forward with a new commit afterwards.
+
 ### Adding another store
 
-1. Create a KV namespace for its OAuth state.
-2. Add an `env.<store>` block in `wrangler.jsonc` with its own `name`, `kv_namespaces`, `vars`, and the `durable_objects` binding.
-3. Create the Worker in Cloudflare, connect it to this repository on `main`, and set the deploy command to `npx wrangler deploy --env <store>`.
-4. Set the four secrets on the new Worker and allow its callback URL in the Google OAuth client.
+1. Create a KV namespace for its OAuth state (`npx wrangler kv namespace create <store>-oauth`).
+2. Add an `env.<store>` block in `wrangler.jsonc` with its own `name`, `kv_namespaces`, `vars`, and the `durable_objects` binding. Copy the `asom` block; bindings and vars are not inherited from the top level.
+3. Add a `deploy:<store>` script to `package.json` and a row to the Deployments table above.
+4. Create the Worker in Cloudflare, connect it to this repository on `main`, and set the production deploy command to `npx wrangler deploy --env <store>` and the preview deploy command to `npx wrangler versions upload --env <store>`.
+5. Set the four secrets on the new Worker and allow its callback URL in the Google OAuth client.
+6. Push to `main` and run the verification steps above.
+
+### Removing a store
+
+1. Delete the Worker in Cloudflare (this also removes its build triggers), then delete its KV namespace.
+2. Remove the `env.<store>` block, the `deploy:<store>` script, and the Deployments row, in one commit on `main`.
